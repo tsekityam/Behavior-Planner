@@ -6,6 +6,53 @@
 #include <string>
 #include <iterator>
 
+vector<string> successor_states(string state) {
+    vector<string> successor_states;
+    
+    if (state.compare("KL") == 0) {
+        successor_states.push_back("KL");
+        successor_states.push_back("PLCL");
+        successor_states.push_back("PLCR");
+    } else if (state.compare("LCL") == 0) {
+        successor_states.push_back("KL");
+    } else if (state.compare("LCR") == 0) {
+        successor_states.push_back("KL");
+    } else if (state.compare("PLCL") == 0) {
+        successor_states.push_back("KL");
+        successor_states.push_back("PLCL");
+        successor_states.push_back("LCL");
+    } else if (state.compare("PLCR") == 0) {
+        successor_states.push_back("KL");
+        successor_states.push_back("PLCR");
+        successor_states.push_back("LCR");
+    }
+
+    return successor_states;
+}
+
+double speed_cost(Vehicle *vehicle, map<int,vector<vector<int>>> predictions) {
+    if (vehicle->v + vehicle->a == 0) {
+        return 1;
+    } else {
+        return 1.0 / (vehicle->v + vehicle->a);
+    }
+}
+
+double off_road_cost(Vehicle *vehicle, map<int,vector<vector<int>>> predictions) {
+    return 0 <= vehicle->lane && vehicle->lane < vehicle->lanes_available ? 0 : 1;
+}
+
+double lane_change_cost(Vehicle *vehicle, map<int,vector<vector<int>>> predictions) {
+    double lane = vehicle->lane;
+    if (vehicle->state.compare("PLCL") == 0) {
+        lane += 0.5;
+    } else if (vehicle->state.compare("PLCR") == 0) {
+        lane -= 0.5;
+    }
+
+    return 1 - exp(-abs(lane - vehicle->goal_lane)/(vehicle->goal_s - vehicle->s));
+}
+
 /**
  * Initializes Vehicle
  */
@@ -57,26 +104,55 @@ void Vehicle::update_state(map<int,vector < vector<int> > > predictions) {
      }
 
      */
-    cout << this->display() << endl;
-    if (this->state.compare("LCL") == 0) {
-        this->state = "KL";
-    } else if (this->state.compare("LCR") == 0) {
-        this->state = "KL";
-    } else if (this->state.compare("PLCL") == 0) {
-        this->state = "LCL";
-    } else if (this->state.compare("PLCR") == 0) {
-        this->state = "LCR";
-    } else {
-        if (this->lane > this->goal_lane) {
-            this->state = "PLCR";
-        } else if (this->lane < this->goal_lane) {
-            this->state = "PLCL";
-        } else {
-            this->state = "KL";
+
+    vector<double (*)(Vehicle *vehicle, map<int,vector<vector<int>>> predictions)> cost_functions;
+    vector<double> weights;
+
+    cost_functions.push_back(&speed_cost);
+    weights.push_back(1);
+
+    cost_functions.push_back(&off_road_cost);
+    weights.push_back(999);
+
+    cost_functions.push_back(&lane_change_cost);
+    weights.push_back(4);
+
+    auto possible_successor_states = successor_states(this->state);
+    
+    map<string, double> costs;
+    
+    for (auto state : possible_successor_states) {
+        auto cost_for_state = 0.0;
+
+        Vehicle *shadow = new Vehicle(this->lane, this->s, this->v, this->a);
+        shadow->configure({this->target_speed, this->lanes_available, this->goal_s, this->goal_lane, this->max_acceleration});
+        shadow->state = state;
+        shadow->realize_state(predictions);
+
+        for (size_t i = 0; i < cost_functions.size(); i++) {
+            auto cost_function = cost_functions.at(i);
+            double cost_for_cost_function = cost_function(shadow, predictions);
+
+            auto weight = weights.at(i);
+
+            cost_for_state += weight * cost_for_cost_function;
+        }
+
+        costs.insert(make_pair(state, cost_for_state));
+
+    }
+
+    string best_next_state;
+    double min_cost = 9999999;
+    for (auto state : possible_successor_states) {
+        double cost  = costs.at(state);
+        if (cost < min_cost) {
+            min_cost = cost;
+            best_next_state = state;
         }
     }
 
-
+    this->state = best_next_state;
 }
 
 void Vehicle::configure(vector<int> road_data) {
